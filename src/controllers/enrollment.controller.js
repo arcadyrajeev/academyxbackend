@@ -1,129 +1,99 @@
-const Course = require("../models/course.model")
-const Enrollment = require("../models/enrollment.model")
+const { supabase } = require("../utils/supabaseClient");
+const ApiError = require("../utils/apiError");
+const ApiResponse = require("../utils/apiResponse");
+const asyncHandler = require("../utils/asyncHandler");
 
-const ApiError = require("../utils/apiError")
-const ApiResponse = require("../utils/apiResponse")
-const asyncHandler = require("../utils/asyncHandler")
-const {mongoose, isValidObjectId} = require("mongoose")
+// Toggle enrollment: enroll or unenroll
+const toggleEnrollment = asyncHandler(async (req, res) => {
+  const { courseId } = req.params;
+  const userId = req?.user?.id;
 
+  if (!courseId) {
+    throw new ApiError(400, "Course ID is required");
+  }
 
+  // Check if course exists
+  const { data: course, error: courseError } = await supabase
+    .from("courses")
+    .select("id")
+    .eq("id", courseId)
+    .single();
 
-const toggleEnrollment = asyncHandler(async(req,res)=>{
-    const{courseId} = req.params
-    if(!isValidObjectId(courseId)){ 
-            throw new ApiError(401,"Invalid course Id")
-        }
-    //checking course is present or not
-    const course = await Course.findById(new mongoose.Types.ObjectId(courseId))
-    if(!course){
-        throw new ApiError(404,"Course not found")
+  if (courseError || !course) {
+    throw new ApiError(404, "Course not found");
+  }
+
+  // Check if user is already enrolled
+  const { data: existingEnrollment, error: enrollmentCheckError } =
+    await supabase
+      .from("enrollments")
+      .select("id")
+      .eq("course_id", courseId)
+      .eq("student_id", userId)
+      .single();
+
+  if (enrollmentCheckError && enrollmentCheckError.code !== "PGRST116") {
+    throw new ApiError(500, "Error checking enrollment");
+  }
+
+  // Unenroll
+  if (existingEnrollment) {
+    const { error: deleteError } = await supabase
+      .from("enrollments")
+      .delete()
+      .eq("id", existingEnrollment.id);
+
+    if (deleteError) {
+      throw new ApiError(500, "Unable to unenroll");
     }
 
-    //check student enrolled or not
-    const isEnrolled = await Enrollment.findOne(
-        {
-            course:new mongoose.Types.ObjectId(courseId),
-            student:req?.user._id
+    return res
+      .status(200)
+      .json(new ApiResponse(200, {}, "Unenrolled successfully"));
+  }
 
-        }
-    )
-    if(isEnrolled){
+  // Enroll
+  const { error: enrollError } = await supabase.from("enrollments").insert([
+    {
+      course_id: courseId,
+      student_id: userId,
+    },
+  ]);
 
-        const unEnrolled = await Enrollment.findOneAndDelete(
-            {
-                course: new mongoose.Types.ObjectId(courseId),
-                student: req?.user._id
-            }
-        )
-        if(!unEnrolled){
-            throw new ApiError(500,"unable to unenrolled!")
-        }
-        return res
-        .status(200)
-        .json(
-            new ApiResponse(200,{},"Unenrolled successfully")
-        )
+  if (enrollError) {
+    throw new ApiError(500, "Unable to enroll right now");
+  }
 
-    }else{
-        const enroll = await Enrollment.create({
-            course: new mongoose.Types.ObjectId(courseId),
-            student: req?.user._id
-        })
-        if(!enroll){
-            throw new ApiError(500,"unable to enroll right now")
-        }
-        return res
-        .status(200)
-        .json(
-            new ApiResponse(200,{},"Successfully enrolled ")
-        )
-    }
-})
-const getPopularCourses = asyncHandler(async (req, res) => {
-    
-    const { limit = 20 } = req.query; // Optional limit parameter, default is 20
-
-    const popularCourses = await Enrollment.aggregate([
-        {
-            $group: {
-                _id: "$course", // Group by course ID
-                totalEnrollments: { $sum: 1 } // Count the number of enrollments for each course
-            }
-        },
-        {
-            $sort: { totalEnrollments: -1 } // Sort by total enrollments in descending order
-        },
-        {
-            $limit: parseInt(limit) // Limit the number of results
-        },
-        {
-            $lookup: {
-                from: "courses", // Join with the Course collection
-                localField: "_id", // The course ID from the Enrollment collection
-                foreignField: "_id", // The course ID in the Course collection
-                as: "courseDetails"
-            }
-        },
-        {
-            $unwind: "$courseDetails" // Flatten the courseDetails array
-        },
-        {
-            $lookup: {
-                from: "users", // Join with the User collection to get educator details
-                localField: "courseDetails.educator",
-                foreignField: "_id",
-                as: "educatorDetails"
-            }
-        },
-        {
-            $unwind: "$educatorDetails" // Flatten the educatorDetails array
-        },
-        {
-            $project: {
-                _id: 0, // Exclude the default _id field
-                courseName: "$courseDetails.courseName",
-                description: "$courseDetails.description",
-                price: "$courseDetails.price",
-                thumbnail: "$courseDetails.thumbnail",
-                category: "$courseDetails.category",
-                totalEnrollments: 1,
-                "educator.username": "$educatorDetails.username",
-                "educator.profileImage": "$educatorDetails.profileImage"
-            }
-        }
-    ]);
-
-    if (!popularCourses || popularCourses.length === 0) {
-        return res.status(404).json(
-            new ApiResponse(404, {}, "No popular courses found")
-        );
-    }
-
-    return res.status(200).json(
-        new ApiResponse(200, popularCourses, "Popular courses fetched successfully")
-    );
+  return res
+    .status(200)
+    .json(new ApiResponse(200, {}, "Successfully enrolled"));
 });
+
+// Get popular courses by enrollment count
+const getPopularCourses = asyncHandler(async (req, res) => {
+  const limit = parseInt(req.query.limit) || 20;
+
+  const { data, error } = await supabase.rpc("get_popular_courses", {
+    limit_value: limit,
+  });
+
+  if (error) {
+    console.error("Supabase RPC Error:", error);
+    throw new ApiError(500, "Failed to fetch popular courses");
+  }
+
+  if (!data || data.length === 0) {
+    return res
+      .status(404)
+      .json(new ApiResponse(404, [], "No popular courses found"));
+  }
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, data, "Popular courses fetched successfully"));
+});
+
 module.exports = {
-    toggleEnrollment,
-    getPopularCourses
-}
+  toggleEnrollment,
+  getPopularCourses,
+};

@@ -1,91 +1,84 @@
 const ApiError = require("../utils/apiError");
 const asyncHandler = require("../utils/asyncHandler");
-const User = require("../models/user.model");
-const mongoose = require("mongoose");
-const Enrollment = require("../models/enrollment.model");
 const ApiResponse = require("../utils/apiResponse");
-const Course = require("../models/course.model");
+const { supabase } = require("../utils/supabaseClient");
 
-// Student Dashboard (User's enrolled courses)
+// Student Dashboard
 const userEnrolledCourse = asyncHandler(async (req, res) => {
-  const userId = req?.user?._id;
-  if (!userId) {
-    throw new ApiError(401, "User is not logged in");
+  const userId = req?.user?.id; // assuming JWT middleware attaches it
+  if (!userId) throw new ApiError(401, "User is not logged in");
+
+  const { data: enrollments, error: enrollmentError } = await supabase
+    .from("enrollments")
+    .select("course_id")
+    .eq("student_id", userId);
+
+  if (enrollmentError) throw new ApiError(500, enrollmentError.message);
+
+  if (!enrollments || enrollments.length === 0) {
+    const { data: user, error: userError } = await supabase
+      .from("users")
+      .select("username, email, profileImage, fullname, bio, coverImage")
+      .eq("id", userId)
+      .single();
+
+    if (userError) throw new ApiError(500, userError.message);
+
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(200, [user], "You have not enrolled in any courses")
+      );
   }
 
-  const enrolled = await Enrollment.findOne({ student: userId });
-  
-  if (!enrolled) {
-    const user = await User.findById(userId).select("-password -refreshToken");
-    return res.status(200).json(
-      new ApiResponse(200, [user], "You have not enrolled in any courses")
+  const courseIds = enrollments.map((e) => e.course_id);
+
+  const { data: userWithCourses, error: userCoursesError } = await supabase
+    .from("users")
+    .select("username, email, profileImage, fullname, bio, coverImage")
+    .eq("id", userId)
+    .single();
+
+  const { data: courses, error: courseError } = await supabase
+    .from("courses")
+    .select("*")
+    .in("id", courseIds);
+
+  if (userCoursesError || courseError)
+    throw new ApiError(500, userCoursesError?.message || courseError?.message);
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        [{ ...userWithCourses, courses }],
+        "Enrolled courses fetched"
+      )
     );
-  }
-
-  const enrolledCourse = await User.aggregate([
-    {
-      $match: {
-        _id: new mongoose.Types.ObjectId(userId),
-      },
-    },
-    {
-      $lookup: {
-        from: "enrollments",
-        localField: "_id",
-        foreignField: "student",
-        as: "courseId",
-      },
-    },
-    {
-      $addFields: {
-        courseIds: {
-          $map: {
-            input: "$courseId",
-            as: "enroll",
-            in: "$$enroll.course",
-          },
-        },
-      },
-    },
-    {
-      $lookup: {
-        from: "courses",
-        localField: "courseIds",
-        foreignField: "_id",
-        as: "courses",
-      },
-    },
-    {
-      $project: {
-        username: 1,
-        email: 1,
-        profileImage: 1,
-        fullname: 1,
-        bio: 1,
-        courses: 1,
-        coverImage: 1,
-      },
-    },
-  ]);
-  return res.status(200).json(
-    new ApiResponse(200, enrolledCourse, "All data fetched with enrollment")
-  );
 });
 
-// Educator Dashboard (Courses the educator teaches)
+// Educator Dashboard
 const educatorDashboard = asyncHandler(async (req, res) => {
-  const userId = req?.user?._id;
-  if (!userId) {
-    throw new ApiError(401, "User is not logged in");
-  }
+  const userId = req?.user?.id;
+  if (!userId) throw new ApiError(401, "User is not logged in");
 
-  const course = await Course.find({
-    educator: new mongoose.Types.ObjectId(userId),
-  }).select("-educator -content");
+  const { data: courses, error } = await supabase
+    .from("courses")
+    .select("id, title, description, coverImage") // exclude content & educator if needed
+    .eq("educator_id", userId);
 
-  return res.status(200).json(
-    new ApiResponse(200, course, course.length ? "Courses fetched successfully" : "No course found for this educator.")
-  );
+  if (error) throw new ApiError(500, error.message);
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        courses,
+        courses.length ? "Courses fetched" : "No courses found."
+      )
+    );
 });
 
 module.exports = {
