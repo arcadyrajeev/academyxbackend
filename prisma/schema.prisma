@@ -13,3 +13,46 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+model User {
+  id              String       @id @default(uuid())
+  name            String
+  email           String       @unique
+  profilePic      String?
+
+  createdCourses  Course[]     @relation("CoursesCreated")
+  enrollments     Enrollment[]
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+}
+
+model Course {
+  id              String       @id @default(uuid())
+  title           String
+  description     String
+  thumbnail       String?
+  thumbnaillow    String?
+  thumbnailblur   String?
+  tags            String[]
+  
+  creator         User         @relation("CoursesCreated", fields: [creatorId], references: [id])
+  creatorId       String
+
+  enrollments     Enrollment[]
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+}
+
+model Enrollment {
+  userId          String
+  courseId        String
+
+  user            User         @relation(fields: [userId], references: [id])
+  course          Course       @relation(fields: [courseId], references: [id])
+
+  enrolledAt      DateTime     @default(now())
+
+  @@id([userId, courseId]) // composite primary key
+}

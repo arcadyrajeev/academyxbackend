@@ -1,9 +1,13 @@
-// supabaseStorage.js
-
-const { supabase } = require("../config/supabaseClient");
+const { createClient } = require("@supabase/supabase-js");
 const { v4: uuidv4 } = require("uuid");
 const path = require("path");
 const ApiError = require("../utils/apiError");
+
+// Initialize Supabase client directly here
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 /**
  * Uploads a file buffer to Supabase Storage
