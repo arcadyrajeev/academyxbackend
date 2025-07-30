@@ -14,45 +14,108 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id              String       @id @default(uuid())
-  name            String
-  email           String       @unique
-  profilePic      String?
+model Account {
+  id                 String   @id @default(uuid())
+  userId             String
+  provider           String   // e.g. "google", "github", "credentials"
+  providerAccountId  String   // e.g. Google user ID
+  type               String   // "oauth" | "credentials"
+  accessToken        String?
+  refreshToken       String?
+  expiresAt          DateTime?
+  tokenType          String?
+  scope              String?
+  idToken            String?
+  sessionState       String?
 
-  createdCourses  Course[]     @relation("CoursesCreated")
-  enrollments     Enrollment[]
+  user User @relation(fields: [userId], references: [id])
 
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  @@unique([provider, providerAccountId]) // Each provider account is unique
 }
 
+
+model User {
+  id          String     @id @default(uuid())
+  name        String?
+  email       String     @unique
+  avatarUrl   String?
+  bannerUrl   String?
+  phone       String?
+  bio         String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  // Relations
+  accounts     Account[]
+  sessions     Session[]
+  enrollments  Enrollment[]
+  courses      Course[]   @relation("InstructorCourses")
+}
+
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  jwtToken  String
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+
 model Course {
-  id              String       @id @default(uuid())
-  title           String
-  description     String
-  thumbnail       String?
-  thumbnaillow    String?
-  thumbnailblur   String?
-  tags            String[]
-  
-  creator         User         @relation("CoursesCreated", fields: [creatorId], references: [id])
-  creatorId       String
+  id            String     @id @default(uuid())
+  title         String
+  description   String
+  thumbnail     String?
+  thumblow      String?
+  thumbblur     String?
+  instructorId  String
+  instructor    User       @relation("InstructorCourses", fields: [instructorId], references: [id])
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  lessons       Lesson[]
+  enrollments   Enrollment[]
+  isPublished   Boolean    @default(false)
+  price         Float      @default(0)
+  category      String?
+}
 
-  enrollments     Enrollment[]
+model Lesson {
+  id         String   @id @default(uuid())
+  title      String
+  content    String
+  videos     Video[]
+  order      Int
+  courseId   String
+  course     Course   @relation(fields: [courseId], references: [id])
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
 
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+model Video {
+  id String @id @default(uuid())
+  title String
+  description String?
+  videourl String?
+  order Int
+  lessonId String
+  lesson Lesson @relation(fields: [lessonId], references: [id])
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 model Enrollment {
-  userId          String
-  courseId        String
+  id         String   @id @default(uuid())
+  userId     String
+  courseId   String
+  enrolledAt DateTime @default(now())
 
-  user            User         @relation(fields: [userId], references: [id])
-  course          Course       @relation(fields: [courseId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+  course Course @relation(fields: [courseId], references: [id])
 
-  enrolledAt      DateTime     @default(now())
-
-  @@id([userId, courseId]) // composite primary key
+  @@unique([userId, courseId])
 }
+
+
