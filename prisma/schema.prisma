@@ -79,7 +79,8 @@ model Course {
   enrollments   Enrollment[]
   isPublished   Boolean    @default(false)
   price         Float      @default(0)
-  category      String?
+  duration      Int
+  category      String
 }
 
 model Lesson {

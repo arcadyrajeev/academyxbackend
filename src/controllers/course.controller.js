@@ -1,26 +1,15 @@
-// Required Imports
-const { supabase } = require("../utils/supabaseClient");
+const prisma = require("../utils/prismaClient");
 const ApiError = require("../utils/apiError");
 const ApiResponse = require("../utils/apiResponse");
 const asyncHandler = require("../utils/asyncHandler");
 const { uploadFileToSupabse } = require("../utils/supabaseStorage");
 
+// Create Course
 const createCourse = asyncHandler(async (req, res) => {
-  const {
-    courseName,
-    description,
-    title,
-    price,
-    duration,
-    category,
-    taqs = [],
-  } = req.body;
+  const { courseName, description, title, price, category } = req.body;
+  const instructorId = req.user?.id;
 
-  if (
-    [courseName, description, price, duration, category].some(
-      (field) => !field || field.trim() === ""
-    )
-  ) {
+  if (![courseName, description, price, category].every(Boolean)) {
     throw new ApiError(400, "All fields are required");
   }
 
@@ -29,175 +18,160 @@ const createCourse = asyncHandler(async (req, res) => {
   }
 
   const thumbnailPath = req.file?.path;
-  if (!thumbnailPath) {
-    throw new ApiError(400, "Thumbnail image is required");
-  }
+  if (!thumbnailPath) throw new ApiError(400, "Thumbnail image is required");
 
-  if (!Array.isArray(taqs) || taqs.length > 10) {
-    throw new ApiError(400, "Taqs must be an array of at most 10 items");
-  }
+  const { publicUrl } = await uploadFileToSupabse("thumbnails", thumbnailPath);
+  if (!publicUrl) throw new ApiError(500, "Thumbnail upload failed");
 
-  const response = await uploadFileToSupabse("thumbnails", thumbnailPath);
-  if (!response?.publicUrl) {
-    throw new ApiError(500, "Thumbnail upload failed");
-  }
-
-  const { data: course, error } = await supabase
-    .from("courses")
-    .insert([
-      {
-        course_name: courseName.trim(),
-        description: description.trim(),
-        title: title?.trim(),
-        price: Number(price),
-        duration: duration?.trim(),
-        category: category?.trim().toLowerCase(),
-        thumbnail: response.publicUrl,
-        educator_id: req.user?.id,
-        taqs: taqs.map((tag) => tag.trim().toLowerCase()),
-      },
-    ])
-    .select("*")
-    .single();
-
-  if (error || !course) throw new ApiError(500, "Failed to create course");
+  const newCourse = await prisma.course.create({
+    data: {
+      title: title?.trim(),
+      description: description.trim(),
+      price: Number(price),
+      category: category?.trim().toLowerCase(),
+      thumbnail: publicUrl,
+      instructorId,
+    },
+  });
 
   return res
-    .status(200)
-    .json(new ApiResponse(200, course, "Course created successfully"));
+    .status(201)
+    .json(new ApiResponse(201, newCourse, "Course created successfully"));
 });
 
+// Update Course
 const updateCourse = asyncHandler(async (req, res) => {
   const { courseId } = req.params;
+  const instructorId = req.user?.id;
 
-  const { data: course, error } = await supabase
-    .from("courses")
-    .select("*")
-    .eq("id", courseId)
-    .single();
-
-  if (error || !course) throw new ApiError(404, "Course not found");
-
-  if (course.educator_id !== req.user?.id) {
-    throw new ApiError(403, "You are not the course owner");
+  const course = await prisma.course.findUnique({ where: { id: courseId } });
+  if (!course) throw new ApiError(404, "Course not found");
+  if (course.instructorId !== instructorId) {
+    throw new ApiError(403, "Unauthorized to update this course");
   }
 
+  const updateFields = {};
   const allowedFields = [
     "courseName",
     "title",
     "description",
     "price",
-    "duration",
     "category",
   ];
-  const updateFields = {};
 
   allowedFields.forEach((field) => {
     const value = req.body[field];
     if (value && value.trim() !== "") {
-      if (field === "price" && Number(value) < 0) {
-        throw new ApiError(400, "Price cannot be negative");
-      }
-      const dbField =
-        field === "courseName" ? "course_name" : field.toLowerCase();
-      updateFields[dbField] = field === "price" ? Number(value) : value.trim();
+      const key = field === "courseName" ? "title" : field;
+      updateFields[key] = field === "price" ? Number(value) : value.trim();
     }
   });
 
-  const { data: updatedCourse, error: updateError } = await supabase
-    .from("courses")
-    .update(updateFields)
-    .eq("id", courseId)
-    .select("*")
-    .single();
-
-  if (updateError || !updatedCourse)
-    throw new ApiError(500, "Course update failed");
+  const updatedCourse = await prisma.course.update({
+    where: { id: courseId },
+    data: updateFields,
+  });
 
   return res
     .status(200)
     .json(new ApiResponse(200, updatedCourse, "Course updated successfully"));
 });
 
+// Update Thumbnail
 const updateThumbnail = asyncHandler(async (req, res) => {
   const { courseId } = req.params;
-  const thumbnailPath = req.file?.path;
+  const instructorId = req.user?.id;
 
-  const { data: course, error } = await supabase
-    .from("courses")
-    .select("*")
-    .eq("id", courseId)
-    .single();
-
-  if (error || !course) throw new ApiError(404, "Course not found");
-  if (course.educator_id !== req.user?.id) {
+  const course = await prisma.course.findUnique({ where: { id: courseId } });
+  if (!course) throw new ApiError(404, "Course not found");
+  if (course.instructorId !== instructorId) {
     throw new ApiError(403, "Not authorized to update this course");
   }
 
-  const response = await uploadFileToSupabse("thumbnails", thumbnailPath);
-  if (!response?.publicUrl) throw new ApiError(500, "Thumbnail upload failed");
+  const thumbnailPath = req.file?.path;
+  const { publicUrl } = await uploadFileToSupabse("thumbnails", thumbnailPath);
+  if (!publicUrl) throw new ApiError(500, "Thumbnail upload failed");
 
-  const { data: updatedCourse, error: updateError } = await supabase
-    .from("courses")
-    .update({ thumbnail: response.publicUrl })
-    .eq("id", courseId)
-    .select("*")
-    .single();
-
-  if (updateError) throw new ApiError(500, "Thumbnail update failed");
+  const updatedCourse = await prisma.course.update({
+    where: { id: courseId },
+    data: { thumbnail: publicUrl },
+  });
 
   return res
     .status(200)
     .json(new ApiResponse(200, updatedCourse, "Thumbnail updated"));
 });
 
-const getAllCourse = asyncHandler(async (req, res) => {
-  const { data: courses, error } = await supabase
-    .from("courses")
-    .select("*, educators(username, profile_image)");
-
-  if (error) throw new ApiError(500, "Error fetching courses");
+// Get All Courses
+const getAllCourse = asyncHandler(async (_req, res) => {
+  const courses = await prisma.course.findMany({
+    include: {
+      instructor: {
+        select: {
+          name: true,
+          avatarUrl: true,
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
 
   return res
     .status(200)
     .json(new ApiResponse(200, courses, "Fetched all courses"));
 });
 
+// Get Course By ID
 const getCourseById = asyncHandler(async (req, res) => {
   const { courseId } = req.params;
 
-  const { data: course, error } = await supabase
-    .from("courses")
-    .select("*, content(*, video(videoTitle, videoUrl)), educators(*)")
-    .eq("id", courseId)
-    .single();
+  const course = await prisma.course.findUnique({
+    where: { id: courseId },
+    include: {
+      instructor: true,
+      lessons: {
+        include: {
+          videos: true,
+        },
+        orderBy: { order: "asc" },
+      },
+    },
+  });
 
-  if (error || !course) throw new ApiError(502, "Error fetching course");
+  if (!course) throw new ApiError(404, "Course not found");
 
   return res
     .status(200)
     .json(new ApiResponse(200, course, "Course details retrieved"));
 });
 
+// Get Courses by Category
 const courseCategory = asyncHandler(async (req, res) => {
   const { category } = req.query;
-
   if (!category || category.trim() === "") {
     throw new ApiError(400, "Category is required");
   }
 
-  const { data: courses, error } = await supabase
-    .from("courses")
-    .select("*, educators(profile_image, username)")
-    .eq("category", category.trim().toLowerCase());
-
-  if (error) throw new ApiError(404, "Error fetching category courses");
+  const courses = await prisma.course.findMany({
+    where: {
+      category: category.trim().toLowerCase(),
+    },
+    include: {
+      instructor: {
+        select: {
+          name: true,
+          avatarUrl: true,
+        },
+      },
+    },
+  });
 
   return res
     .status(200)
     .json(new ApiResponse(200, courses, `${category} courses fetched`));
 });
 
+// List of Categories
 const listOfCourseCategory = asyncHandler(async (_req, res) => {
   const categories = [
     "Artificial Intelligence",
@@ -220,15 +194,16 @@ const listOfCourseCategory = asyncHandler(async (_req, res) => {
   return res.status(200).json({ categories });
 });
 
+// Get Free Courses
 const freeCourses = asyncHandler(async (_req, res) => {
-  const { data: courses, error } = await supabase
-    .from("courses")
-    .select("*")
-    .eq("price", 0);
+  const courses = await prisma.course.findMany({
+    where: { price: 0 },
+    orderBy: { createdAt: "desc" },
+  });
 
-  if (error) throw new ApiError(500, "Error fetching free courses");
-
-  return res.status(200).json(new ApiResponse(200, courses, "Free courses"));
+  return res
+    .status(200)
+    .json(new ApiResponse(200, courses, "Free courses fetched"));
 });
 
 module.exports = {
