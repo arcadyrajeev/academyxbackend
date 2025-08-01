@@ -1,15 +1,11 @@
 // src/controllers/lessons.controller.js
-
-import { supabase } from "../utils/supabaseClient.js";
-import {
-  uploadVideoToSupabase,
-  deleteVideoFromSupabase,
-} from "../utils/supabaseStorage.js";
+import prisma from "../utils/prismaClient.js";
+import { uploadVideoToSupabase } from "../utils/supabaseStorage.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import ApiError from "../utils/apiError.js";
 import ApiResponse from "../utils/apiResponse.js";
 
-export const createLesson = asyncHandler(async (req, res) => {
+const createLesson = asyncHandler(async (req, res) => {
   const { courseId } = req.params;
   const { lessonTitle, details, videoTitle } = req.body;
   const file = req.file;
@@ -22,57 +18,189 @@ export const createLesson = asyncHandler(async (req, res) => {
   }
 
   // Check if course exists and educator owns it
-  const { data: course, error: courseErr } = await supabase
-    .from("courses")
-    .select("*")
-    .eq("id", courseId)
-    .single();
+  const course = await prisma.course.findUnique({
+    where: { id: courseId },
+  });
 
-  if (courseErr || !course) throw new ApiError(404, "Course not found");
-  if (course.educator_id !== req.user.id)
+  if (!course) throw new ApiError(404, "Course not found");
+  if (course.instructorId !== req.user.id)
     throw new ApiError(403, "Unauthorized");
 
   // Upload video
   const videoUpload = await uploadVideoToSupabase(file);
   if (!videoUpload?.publicUrl) throw new ApiError(500, "Video upload failed");
 
-  // Insert video record
-  const { data: video, error: videoErr } = await supabase
-    .from("videos")
-    .insert({ title: videoTitle, url: videoUpload.publicUrl })
-    .select()
-    .single();
+  // Get current lesson count to determine order
+  const lessonCount = await prisma.lesson.count({
+    where: { courseId },
+  });
 
-  if (videoErr) throw new ApiError(500, "Video record creation failed");
-
-  // Create lesson
-  const { data: lesson, error: lessonErr } = await supabase
-    .from("lessons")
-    .insert({
-      course_id: courseId,
+  // Create lesson with video
+  const lesson = await prisma.lesson.create({
+    data: {
       title: lessonTitle,
-      details: details || "",
-      video_ids: [video.id],
-    })
-    .select()
-    .single();
-
-  if (lessonErr) throw new ApiError(500, "Lesson creation failed");
+      content: details || "",
+      order: lessonCount + 1,
+      course: { connect: { id: courseId } },
+      videos: {
+        create: {
+          title: videoTitle,
+          videourl: videoUpload.publicUrl,
+          order: 1,
+        },
+      },
+    },
+    include: {
+      videos: true,
+    },
+  });
 
   return res
     .status(200)
     .json(new ApiResponse(200, lesson, "Lesson created successfully"));
 });
 
-// Other methods (addVideoLesson, editLesson, deleteLessonById...) will follow the same structure
-// and be migrated similarly using supabaseClient and supabaseStorage
+const getLessonsByCourse = asyncHandler(async (req, res) => {
+  const { courseId } = req.params;
 
-// Export all handlers in one place like before
-export default {
+  const lessons = await prisma.lesson.findMany({
+    where: { courseId },
+    include: { videos: true },
+    orderBy: { order: "asc" },
+  });
+
+  if (!lessons.length) {
+    throw new ApiError(404, "No lessons found for this course");
+  }
+
+  res
+    .status(200)
+    .json(new ApiResponse(200, lessons, "Lessons fetched successfully"));
+});
+
+const addVideoLesson = asyncHandler(async (req, res) => {
+  const { courseId, lessonId } = req.params;
+  const { videoTitle } = req.body;
+  const file = req.file;
+
+  if (!videoTitle || !file) {
+    throw new ApiError(400, "video title and video are required");
+  }
+
+  const course = await prisma.course.findUnique({
+    where: { id: courseId },
+  });
+
+  if (!course) throw new ApiError(404, "course not found");
+
+  const lesson = await prisma.lesson.findUnique({
+    where: { courseId: courseId, id: lessonId },
+  });
+
+  if (!lesson) throw new ApiError(404, "lesson not found");
+
+  const videUpload = await uploadVideoToSupabase(file);
+  if (!videoUpload?.publicUrl) throw new ApiError(500, "Video upload failed");
+
+  const videoCount = await prisma.video.count({
+    where: { lessonId },
+  });
+
+  const newVideo = await prisma.video.create({
+    data: {
+      title: videoTitle,
+      videourl: videUpload.publicUrl,
+      order: videoCount + 1,
+      lesson: { connect: { id, lessonId } },
+    },
+  });
+
+  return res
+    .status(201)
+    .json(new ApiResponse(201, newVideo, "Video added to lesson"));
+});
+
+const editLesson = asyncHandler(async (req, res) => {
+  const { courseId, lessonId } = req.params;
+  const { lessonTitle, details } = req.body;
+
+  const course = await prisma.course.findUnique({
+    where: { id: courseId },
+  });
+
+  if (!course || course.instructorId !== req.user.id)
+    throw new ApiError(404, "unauthorized or Course not found");
+
+  const updatedLesson = await prisma.lesson.update({
+    where: { id: lessonId },
+    data: {
+      title: lessonTitle,
+      content: details,
+    },
+  });
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, updatedLesson, "Lesson updated successfully"));
+});
+
+const deleteVideo = asyncHandler(async (req, res) => {
+  const { courseId, lessonId, videoId } = req.params;
+
+  const course = await prisma.course.findUnique({
+    where: { id: courseId },
+  });
+
+  if (!course || course.instructorId !== req.user.id) {
+    throw new ApiError(403, "Unauthorized or course not found");
+  }
+
+  const video = await prisma.video.findUnique({
+    where: { id: videoId },
+  });
+
+  if (!video) throw new ApiError(404, "Video not found");
+
+  await prisma.video.delete({
+    where: { id: videoId },
+  });
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, null, "Video deleted successfully"));
+});
+
+const deleteLessonById = asyncHandler(async (req, res) => {
+  const { courseId, lessonId } = req.params;
+
+  const course = await prisma.course.findUnique({
+    where: { id: courseId },
+  });
+
+  if (!course || course.instructorId !== req.user.id) {
+    throw new ApiError(403, "Unauthorized or course not found");
+  }
+
+  const lesson = await prisma.lesson.findUnique({
+    where: { id: lessonId },
+  });
+
+  if (!lesson) throw new ApiError(404, "Lesson not found");
+
+  await prisma.lesson.delete({
+    where: { id: lessonId },
+  });
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, null, "Lesson deleted successfully"));
+});
+
+export {
   createLesson,
-  // addVideoLesson,
-  // editLesson,
-  // deleteLessonById,
-  // deleteVideo,
-  // getLessonsByCourse,
+  getLessonsByCourse,
+  addVideoLesson,
+  editLesson,
+  deleteVideo,
+  deleteLessonById,
 };

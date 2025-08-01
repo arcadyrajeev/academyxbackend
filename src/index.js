@@ -1,8 +1,9 @@
 require("dotenv").config({ path: "./src/.env" });
 
-const app = require("./app.js");
+const app = require("./app");
 
-const port = process.env.PORT || 8000;
+const PORT = process.env.PORT || 8000;
 
-console.log("SUPABASE URL:", process.env.SUPABASE_URL);
-console.log("SUPABASE KEY:", process.env.SUPABASE_SERVICE_ROLE_KEY);
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});

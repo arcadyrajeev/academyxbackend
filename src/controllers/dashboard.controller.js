@@ -1,29 +1,34 @@
+const prisma = require("../utils/prismaClient");
+
 const ApiError = require("../utils/apiError");
 const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/apiResponse");
-const { supabase } = require("../utils/supabaseClient");
 
 // Student Dashboard
 const userEnrolledCourse = asyncHandler(async (req, res) => {
-  const userId = req?.user?.id; // assuming JWT middleware attaches it
+  const userId = req?.user?.id;
   if (!userId) throw new ApiError(401, "User is not logged in");
 
-  const { data: enrollments, error: enrollmentError } = await supabase
-    .from("enrollments")
-    .select("course_id")
-    .eq("student_id", userId);
+  const enrollments = await prisma.enrollment.findMany({
+    where: { studentId: userId },
+    select: { courseId: true },
+  });
 
-  if (enrollmentError) throw new ApiError(500, enrollmentError.message);
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      username: true,
+      email: true,
+      profileImage: true,
+      fullname: true,
+      bio: true,
+      coverImage: true,
+    },
+  });
+
+  if (!user) throw new ApiError(404, "User not found");
 
   if (!enrollments || enrollments.length === 0) {
-    const { data: user, error: userError } = await supabase
-      .from("users")
-      .select("username, email, profileImage, fullname, bio, coverImage")
-      .eq("id", userId)
-      .single();
-
-    if (userError) throw new ApiError(500, userError.message);
-
     return res
       .status(200)
       .json(
@@ -31,30 +36,16 @@ const userEnrolledCourse = asyncHandler(async (req, res) => {
       );
   }
 
-  const courseIds = enrollments.map((e) => e.course_id);
+  const courseIds = enrollments.map((e) => e.courseId);
 
-  const { data: userWithCourses, error: userCoursesError } = await supabase
-    .from("users")
-    .select("username, email, profileImage, fullname, bio, coverImage")
-    .eq("id", userId)
-    .single();
-
-  const { data: courses, error: courseError } = await supabase
-    .from("courses")
-    .select("*")
-    .in("id", courseIds);
-
-  if (userCoursesError || courseError)
-    throw new ApiError(500, userCoursesError?.message || courseError?.message);
+  const courses = await prisma.course.findMany({
+    where: { id: { in: courseIds } },
+  });
 
   return res
     .status(200)
     .json(
-      new ApiResponse(
-        200,
-        [{ ...userWithCourses, courses }],
-        "Enrolled courses fetched"
-      )
+      new ApiResponse(200, [{ ...user, courses }], "Enrolled courses fetched")
     );
 });
 
@@ -63,12 +54,15 @@ const educatorDashboard = asyncHandler(async (req, res) => {
   const userId = req?.user?.id;
   if (!userId) throw new ApiError(401, "User is not logged in");
 
-  const { data: courses, error } = await supabase
-    .from("courses")
-    .select("id, title, description, coverImage") // exclude content & educator if needed
-    .eq("educator_id", userId);
-
-  if (error) throw new ApiError(500, error.message);
+  const courses = await prisma.course.findMany({
+    where: { educatorId: userId },
+    select: {
+      id: true,
+      title: true,
+      description: true,
+      coverImage: true,
+    },
+  });
 
   return res
     .status(200)

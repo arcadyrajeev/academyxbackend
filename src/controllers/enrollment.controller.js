@@ -1,4 +1,4 @@
-const { supabase } = require("../utils/supabaseClient");
+const { prisma } = require("../utils/prismaClient");
 const ApiError = require("../utils/apiError");
 const ApiResponse = require("../utils/apiResponse");
 const asyncHandler = require("../utils/asyncHandler");
@@ -13,24 +13,21 @@ const toggleEnrollment = asyncHandler(async (req, res) => {
   }
 
   // Check if course exists
-  const { data: course, error: courseError } = await supabase
-    .from("courses")
-    .select("id")
-    .eq("id", courseId)
-    .single();
+
+  const course = await prisma.course.findUnique({
+    where: { id: courseId },
+    select: { id: true },
+  });
 
   if (courseError || !course) {
-    throw new ApiError(404, "Course not found");
+    throw new ApiError(404, "Cour se not found");
   }
 
   // Check if user is already enrolled
-  const { data: existingEnrollment, error: enrollmentCheckError } =
-    await supabase
-      .from("enrollments")
-      .select("id")
-      .eq("course_id", courseId)
-      .eq("student_id", userId)
-      .single();
+
+  const existingEnrollment = await prisma.enrollment.findFirst({
+    where: { courseId, studentId: userId },
+  });
 
   if (enrollmentCheckError && enrollmentCheckError.code !== "PGRST116") {
     throw new ApiError(500, "Error checking enrollment");
@@ -38,10 +35,9 @@ const toggleEnrollment = asyncHandler(async (req, res) => {
 
   // Unenroll
   if (existingEnrollment) {
-    const { error: deleteError } = await supabase
-      .from("enrollments")
-      .delete()
-      .eq("id", existingEnrollment.id);
+    await prisma.enrollment.delete({
+      where: { id: existingEnrollment.id },
+    });
 
     if (deleteError) {
       throw new ApiError(500, "Unable to unenroll");
@@ -53,12 +49,13 @@ const toggleEnrollment = asyncHandler(async (req, res) => {
   }
 
   // Enroll
-  const { error: enrollError } = await supabase.from("enrollments").insert([
-    {
-      course_id: courseId,
-      student_id: userId,
+
+  await prisma.enrollment.create({
+    data: {
+      courseId,
+      studentId: userId,
     },
-  ]);
+  });
 
   if (enrollError) {
     throw new ApiError(500, "Unable to enroll right now");
@@ -73,24 +70,36 @@ const toggleEnrollment = asyncHandler(async (req, res) => {
 const getPopularCourses = asyncHandler(async (req, res) => {
   const limit = parseInt(req.query.limit) || 20;
 
-  const { data, error } = await supabase.rpc("get_popular_courses", {
-    limit_value: limit,
+  const popularCourses = await prisma.course.findMany({
+    take: limit,
+    orderBy: {
+      enrollments: {
+        _count: "desc",
+      },
+    },
+    include: {
+      _count: {
+        select: { enrollments: true },
+      },
+    },
   });
 
-  if (error) {
-    console.error("Supabase RPC Error:", error);
-    throw new ApiError(500, "Failed to fetch popular courses");
-  }
-
-  if (!data || data.length === 0) {
+  if (!popularCourses.length) {
     return res
       .status(404)
       .json(new ApiResponse(404, [], "No popular courses found"));
   }
 
-  return res
-    .status(200)
-    .json(new ApiResponse(200, data, "Popular courses fetched successfully"));
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      popularCourses.map((c) => ({
+        ...c,
+        enrollmentCount: c._count.enrollments,
+      })),
+      "Popular courses fetched successfully"
+    )
+  );
 });
 
 module.exports = {
