@@ -7,8 +7,11 @@ const {
   updateProfile,
   changePassword,
   deleteAccount,
+  getAllUsers,
 } = require("../controllers/user.controller");
+const { verifyAdminApiKey } = require("../middleware/apiKey.middleware");
 
+router.get("/", verifyAdminApiKey, getAllUsers);
 router.post("/:userId/profile/image", uploadProfileImage);
 router.post("/:userId/cover/image", uploadCoverImage);
 router.put("/:userId/updateprofile", updateProfile);

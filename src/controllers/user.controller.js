@@ -8,11 +8,19 @@ const { uploadFileToSupabase } = require("../utils/supabaseStorage");
 const { validatePassword } = require("../services/auth.service");
 
 const {
+  getall,
   updateUserProfile,
   updatePassword,
   findUserById,
   deleteUserAccount,
 } = require("../services/user.service");
+
+const getAllUsers = asyncHandler(async (req, res) => {
+  const users = await getall();
+  res
+    .status(200)
+    .json(new ApiResponse(200, users, "Users retrieved successfully"));
+});
 
 const uploadProfileImage = asyncHandler(async (req, res) => {
   const { userId } = req.params;
@@ -84,4 +92,5 @@ module.exports = {
   updateProfile,
   changePassword,
   deleteAccount,
+  getAllUsers,
 };

@@ -22,7 +22,7 @@ const dashboardRouter = require("./routes/dashboard.route.js");
 //const paymentRouter = require("../src/routes/razorpayPayment.route.js")
 
 app.use("/api/v1/auth", authRouter);
-app.use("/api/v1/user", userRouter);
+app.use("/api/v1/users", userRouter);
 app.use("/api/v1/courses", courseRouter);
 app.use("/api/v1/lessons", lessonRouter);
 app.use("/api/v1/enrollments", enrollmentRouter);

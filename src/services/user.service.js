@@ -3,6 +3,20 @@ const prisma = require("../utils/prismaClient");
 const ApiError = require("../utils/apiError");
 const { use } = require("passport");
 
+exports.getall = () =>
+  prisma.user.findMany({
+    select: {
+      id: true,
+      username: true,
+      email: true,
+      avatarUrl: true,
+      createdAt: true,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+
 exports.findUserById = (userId) =>
   prisma.user.findUnique({
     where: { id: userId },
