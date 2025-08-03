@@ -1,25 +1,18 @@
-const {Router} = require('express')
-const upload = require('../middleware/multer.middleware.js')
-const router = Router()
+// routes/userRoutes.js
+const express = require("express");
+const router = express.Router();
 const {
-    registerUser,
-    loginUser,
-    logoutUser,
-    uploadProfileImage,
-    refreshAccessToken,
-    changePassword,
-    updateProfile,
-    uploadCoverImage
-} = require("../controllers/user.controller.js")
-const { verifyJWT } = require('../middleware/auth.middleware.js')
+  uploadProfileImage,
+  uploadCoverImage,
+  updateProfile,
+  changePassword,
+  deleteAccount,
+} = require("../controllers/user.controller");
 
-router.route("/updateProfile").put(verifyJWT,updateProfile)
-router.route("/updateCoverImage").post(verifyJWT,upload.single("coverImage"),uploadCoverImage)
-router.route("/register").post(registerUser)
-router.route("/login").post(loginUser)
-router.route("/logout").get(verifyJWT,logoutUser)
-router.route("/updateProfileImage").post(verifyJWT,upload.single("profileImage"),uploadProfileImage)
-router.route("/refreshAccessToken").get(refreshAccessToken)
-router.route("/changePassword").post(verifyJWT,changePassword)
+router.post("/:userId/profile/image", uploadProfileImage);
+router.post("/:userId/cover/image", uploadCoverImage);
+router.put("/:userId/updateprofile", updateProfile);
+router.put("/:userId/changepassword", changePassword);
+router.delete("/:userId/delete", deleteAccount);
 
-module.exports = router
+module.exports = router;

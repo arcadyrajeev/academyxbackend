@@ -36,14 +36,19 @@ model Account {
 
 model User {
   id          String     @id @default(uuid())
-  name        String?
+  username    String
+  fullName    String?
   email       String     @unique
+  password    String
   avatarUrl   String?
   bannerUrl   String?
   phone       String?
   bio         String?
+  refreshToken  String?
+  isEmailVerified Boolean @default(false)
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
+
 
   // Relations
   accounts     Account[]
